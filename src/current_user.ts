@@ -4,7 +4,6 @@ import BasicMessage from './basic_message';
 import BasicMessageEnricher from './basic_message_enricher';
 import ChatManagerDelegate from './chat_manager_delegate';
 import FetchedAttachment from './fetched_attachment';
-import FileResource from './file_resource';
 import GlobalUserStore from './global_user_store';
 import Message from './message';
 import PayloadDeserializer from './payload_deserializer';
@@ -46,19 +45,30 @@ export interface CurrentUserOptions {
   userStore: GlobalUserStore;
 }
 
-export interface Attachment {
+export interface DataAttachment {
   file: Blob;
   name: string;
 }
 
-export interface MessageOptions {
-  attachment?: Attachment;
+export interface LinkAttachment {
+  link: string;
+  type: string;
+}
+
+export interface AttachmentBody {
+  resource_link: string;
+  type: string;
+}
+
+export interface SendMessageOptions {
+  linkAttachment?: LinkAttachment;
+  dataAttachment?: DataAttachment;
   roomId: number;
   text?: string;
 }
 
 export interface CompleteMessageOptions {
-  attachement?: FileResource;
+  attachment?: AttachmentBody;
   roomId: number;
   text?: string;
   user_id: string;
@@ -173,9 +183,7 @@ export default class CurrentUser {
           },
           error => {
             this.apiInstance.logger.debug(
-              `Unable to add user with id ${userId} to room \(room.name):: ${
-                error
-              }`,
+              `Unable to add user with id ${userId} to room \(room.name):: ${error}`,
             );
             reject();
           },
@@ -312,9 +320,7 @@ export default class CurrentUser {
       })
       .catch((error: any) => {
         this.apiInstance.logger.verbose(
-          `Error when attempting to ${membershipChange} users from room ${
-            roomId
-          }:`,
+          `Error when attempting to ${membershipChange} users from room ${roomId}:`,
           error,
         );
         onError(error);
@@ -424,33 +430,46 @@ export default class CurrentUser {
   }
 
   sendMessage(
-    options: MessageOptions,
+    options: SendMessageOptions,
     onSuccess: (messageId: number) => void,
     onError: (error: any) => void,
   ) {
-    const { attachment, ...rest } = options;
+    const { linkAttachment, dataAttachment, ...rest } = options;
 
-    if (attachment !== undefined) {
-      this.uploadFile(attachment.file, attachment.name, options.roomId)
+    if (linkAttachment !== undefined && dataAttachment !== undefined) {
+      onError(new Error('You can only provide at most one attachment per message'));
+      return;
+    }
+
+    if (dataAttachment !== undefined) {
+      const { file, name } = dataAttachment;
+      this.uploadFile(file, name, options.roomId)
         .then((fileRes: any) => {
-          return {
-            attachment: fileRes,
-            user_id: this.id,
-            ...rest,
-          };
-        })
-        .then((completeOptions: CompleteMessageOptions) => {
           this.sendMessageWithCompleteOptions(
-            completeOptions,
+            {
+              attachment: fileRes,
+              user_id: this.id,
+              ...rest,
+            },
             onSuccess,
             onError,
           );
         });
     } else {
-      const completeOptions = {
+      // TODO: Shouldn't be an any
+      let completeOptions: any = {
         user_id: this.id,
         ...options,
       };
+
+      if (linkAttachment !== undefined) {
+        const { link, type } = linkAttachment;
+
+        completeOptions.attachment = {
+          resource_link: link,
+          type,
+        };
+      }
 
       this.sendMessageWithCompleteOptions(completeOptions, onSuccess, onError);
     }
@@ -543,9 +562,9 @@ export default class CurrentUser {
                   },
                   error => {
                     this.apiInstance.logger.verbose(
-                      `Unable to enrich basic mesage ${basicMessage.id}: ${
-                        error
-                      }`,
+                      `Unable to enrich basic mesage ${
+                        basicMessage.id
+                      }: ${error}`,
                     );
                     reject();
                   },
