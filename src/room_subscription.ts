@@ -1,5 +1,6 @@
 import { Instance, Logger, SubscriptionEvent } from 'pusher-platform';
 
+import BasicCursor from './basic_cursor';
 import BasicMessageEnricher from './basic_message_enricher';
 import PayloadDeserializer from './payload_deserializer';
 import RoomDelegate from './room_delegate';
@@ -8,17 +9,20 @@ import User from './user';
 export interface RoomSubscriptionOptions {
   delegate?: RoomDelegate;
   basicMessageEnricher: BasicMessageEnricher;
+  cursor?: BasicCursor;
   logger: Logger;
 }
 
 export default class RoomSubscription {
   delegate?: RoomDelegate;
   basicMessageEnricher: BasicMessageEnricher;
+  cursor?: BasicCursor;
   logger: Logger;
 
   constructor(options: RoomSubscriptionOptions) {
     this.delegate = options.delegate;
     this.basicMessageEnricher = options.basicMessageEnricher;
+    this.cursor = options.cursor;
     this.logger = options.logger;
   }
 
@@ -43,6 +47,9 @@ export default class RoomSubscription {
     this.basicMessageEnricher.enrich(
       basicMessage,
       message => {
+        if (this.cursor) {
+          message.read = message.id <= this.cursor.position;
+        }
         this.logger.verbose(`Room received new message: ${message.text}`);
 
         if (this.delegate && this.delegate.newMessage) {

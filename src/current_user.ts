@@ -512,27 +512,46 @@ export default class CurrentUser {
 
   // TODO: Do I need to add a Last-Event-ID option here?
   subscribeToRoom(room: Room, roomDelegate: RoomDelegate, messageLimit = 20) {
-    room.subscription = new RoomSubscription({
-      basicMessageEnricher: new BasicMessageEnricher(
-        this.userStore,
-        room,
-        this.apiInstance.logger,
-      ),
-      delegate: roomDelegate,
-      logger: this.apiInstance.logger,
-    });
+    // make this request in parallel, and combine the results in the enricher?
+    this.cursorsInstance
+      .request({
+        method: 'GET',
+        path: `/cursors/${CursorType.Read}/rooms/${room.id}/users/${this.id}`,
+      })
+      .then(res => {
+        const cursor = JSON.parse(res);
+        room.subscription = new RoomSubscription({
+          basicMessageEnricher: new BasicMessageEnricher(
+            this.userStore,
+            room,
+            this.apiInstance.logger,
+          ),
+          cursor,
+          delegate: roomDelegate,
+          logger: this.apiInstance.logger,
+        });
 
-    // TODO: What happens if you provide both a message_limit and a Last-Event-ID?
+        // TODO: What happens if you provide both a message_limit and a Last-Event-ID?
 
-    this.apiInstance.subscribeNonResuming({
-      listeners: {
-        onError: roomDelegate.error,
-        onEvent: room.subscription.handleEvent.bind(room.subscription),
-      },
-      path: `/rooms/${room.id}?message_limit=${messageLimit}`,
-    });
+        this.apiInstance.subscribeNonResuming({
+          listeners: {
+            onError: roomDelegate.error,
+            onEvent: room.subscription.handleEvent.bind(room.subscription),
+          },
+          path: `/rooms/${room.id}?message_limit=${messageLimit}`,
+        });
 
-    this.subscribeToCursors(room, roomDelegate);
+        this.subscribeToCursors(room, roomDelegate);
+      })
+      .catch(err => {
+        this.cursorsInstance.logger.verbose(
+          `Error getting cursor for user ${this.id} in room ${room.name}:`,
+          err,
+        );
+        if (roomDelegate.error) {
+          roomDelegate.error(err);
+        }
+      });
   }
 
   fetchMessagesFromRoom(
